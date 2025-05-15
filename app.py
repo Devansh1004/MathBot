@@ -1,0 +1,123 @@
+import streamlit as st
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain.agents import Tool, initialize_agent, AgentType
+from langchain_core.tools import tool
+import os, time
+import tempfile
+from PIL import Image
+import traceback
+
+st.set_page_config(page_title="Math Solver Chatbot", page_icon="🧮")
+st.title("🧮 MathBot")
+st.subheader("Hello! I am MathBot, your aid in solving math problems :D\nI can solve equations, search for complex topics on the web" \
+"and even generate graphs for you! (Hey, even ChatGPT can't do that yet ;)")
+
+def initiate_chat():
+    st.session_state.chat_history = [SystemMessage(content = "You are a helpful math solver chatbot named MathBot. "
+        "Please answer any questions the user asks. Identify yourself as a Math solver chatbot strictly, if asked." \
+        "You have two tools with you, one can search the web for any advanced topics, and the other can generate plots if the user asks for." \
+        "Try to keep the chat relevant to mathematics and related questions. Try to use advanced mathematical formulas and laws."
+        "You should give explanations as well as numerical answers also if the question asks so. Do not leave for the user to calculate."
+        "Try to use advanced mathematical formulas that you know to solve the given questions.")]
+    st.session_state.chat = [SystemMessage(content = "You are a helpful math solver chatbot named MathBot. "
+        "Please answer any questions the user asks. Identify yourself as a Math solver chatbot strictly, if asked." \
+        "You have two tools with you, one can search the web for any advanced topics, and the other can generate plots if the user asks for." \
+        "Try to keep the chat relevant to mathematics and related questions. Try to use advanced mathematical formulas and laws."
+        "You should give explanations as well as numerical answers also if the question asks so. Do not leave for the user to calculate."
+        "Try to use advanced mathematical formulas that you know to solve the given questions.")]
+
+with st.sidebar:
+    button1 = st.button("New Chat")
+    if button1:
+        initiate_chat()
+        
+    GROQ_API_KEY = st.text_input(
+        label="🔑 Enter your Groq API Key",
+        help="Generate it from https://console.groq.com/keys",
+        type="password",
+        placeholder="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",
+    )
+    st.markdown("""
+                ### Or use this key if you don't have one:
+                > <span style='font-size: 0.5em;'> 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</span>
+                """, unsafe_allow_html=True)
+
+if GROQ_API_KEY:
+    llm = ChatGroq(model_name="gemma2-9b-it", temperature=0, api_key=GROQ_API_KEY, streaming=True)
+
+    @tool
+    def search_web(query:str):
+        '''Search on the DuckDuckGo Search API for any concept or question you do not know and cannot solve. Only to be used for mathematical concepts where 
+        you struggle. Strictly Do not use for fetching conversation history or anything other than mathematical concepts.'''
+        search = DuckDuckGoSearchRun()
+        return search.invoke(query)
+
+    @tool
+    def plot_graphs(query:str):
+        """Used to generate plots, graphs if asked by user."""
+        
+        plot_llm = ChatGroq(model_name="llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY)
+        
+        plot_prompt = [SystemMessage(content="You are an expert at generating Matplotlib code. For the given mathematical question or " \
+        "equation given, generate appropriate code to plot the function in Matplotlib. Strictly check your provided code. " \
+        "Do not generate any extra text. Only give code with correct syntax."), 
+        HumanMessage(content=query)]
+        
+        code = plot_llm.invoke(plot_prompt).content.replace('python', '').replace('`', '')
+        
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+
+                code = code.replace("plt.show()", f"plt.savefig(r'{tmpdir}\plot.png')")
+
+                exec(code, {}, {})
+
+                plot_path = fr"{tmpdir}\plot.png"
+                if os.path.exists(plot_path):
+                    new_path = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
+                    os.replace(plot_path, new_path)
+                    st.session_state.chat.append(new_path)
+                    st.chat_message('ai').image(Image.open(new_path), caption="Generated Plot", use_container_width=True)
+                    return f"Image generated successfully!"
+
+        except Exception as e:
+            return f"Error executing code:\n{traceback.format_exc()}"
+
+
+    agent_executor = initialize_agent(
+        tools=[search_web, plot_graphs],
+        llm=llm,
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        verbose=True,
+    )
+
+    def stream_data(response):
+        for word in response.split(' '):
+            yield word+" "
+            time.sleep(0.01)
+
+    if "chat_history" not in st.session_state:
+        initiate_chat()
+
+
+    for msg in st.session_state.chat:
+        if isinstance(msg, HumanMessage):
+            st.chat_message("user").markdown(msg.content, unsafe_allow_html=True)
+        elif isinstance(msg, AIMessage):
+            st.chat_message("ai").markdown(msg.content, unsafe_allow_html=True)
+        elif isinstance(msg, str):
+            st.chat_message('ai').image(Image.open(msg), caption="Generated Plot", use_container_width=True)
+
+
+    if user_input := st.chat_input("Type your math question..."):
+        st.session_state.chat_history.append(HumanMessage(user_input))
+        st.session_state.chat.append(HumanMessage(user_input))
+        st.chat_message("user").markdown(user_input, unsafe_allow_html=True)
+
+        response = agent_executor.invoke(st.session_state.chat_history)['output']
+
+        st.session_state.chat_history.append(AIMessage(response))
+        st.session_state.chat.append(AIMessage(response))
+        st.chat_message('ai').write_stream(stream_data(response))
