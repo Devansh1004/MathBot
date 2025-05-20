@@ -30,10 +30,6 @@ with st.sidebar:
         type="password",
         placeholder="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",
     )
-    st.markdown("""
-                ### Or use this key if you don't have one:
-                > <span style='font-size: 0.5em;'> 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</span>
-                """, unsafe_allow_html=True)
 
 if GROQ_API_KEY:
     llm = ChatGroq(model_name="gemma2-9b-it", temperature=0.1, api_key=GROQ_API_KEY, streaming=True)
