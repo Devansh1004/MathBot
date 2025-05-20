@@ -76,6 +76,7 @@ if GROQ_API_KEY:
         tools=[search_web, plot_graphs],
         llm=llm,
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        handle_parsing_errors=True,
         verbose=True,
     )
 
