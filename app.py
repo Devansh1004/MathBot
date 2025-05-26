@@ -18,6 +18,7 @@ st.subheader("Hello! I am MathBot, your aid in solving math problems :D\nI can s
 
 def initiate_chat():
     st.session_state.chat = []
+    st.session_state.memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
 
 with st.sidebar:
     button1 = st.button("New Chat")
@@ -72,8 +73,11 @@ else:
         except Exception:
             return f"Error executing code:\n{traceback.format_exc()}"
 
+    if "memory" not in st.session_state:
+        initiate_chat()
 
-    memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True)
+
+    memory = st.session_state.memory
 
     memory.chat_memory.messages.append(SystemMessage(content="""You are MathBot, a dedicated mathematics solver chatbot. Your only task is to assist users with math-related questions using complete, step-by-step solutions and precise mathematical reasoning.
 
@@ -117,7 +121,7 @@ else:
     def stream_data(response):
         for word in response.split(' '):
             yield word+" "
-            time.sleep(0.01)
+            time.sleep(0.005)
 
     if "chat" not in st.session_state:
         initiate_chat()
@@ -133,9 +137,16 @@ else:
 
     if user_input := st.chat_input("Type your math question..."):
         st.chat_message("user").markdown(user_input, unsafe_allow_html=True)
-        
-        st.session_state.chat.append(HumanMessage(user_input))
-        response = agent_executor.invoke(user_input)['output']
 
-        st.session_state.chat.append(AIMessage(response))
-        st.chat_message('ai').write_stream(stream_data(response))
+        # Let LangChain agent handle the memory internally
+        try:
+            response = agent_executor.invoke({"input": user_input})
+            ai_output = response["output"]
+
+            # Add to session history for Streamlit UI
+            st.session_state.chat.append(HumanMessage(content=user_input))
+            st.session_state.chat.append(AIMessage(content=ai_output))
+
+            st.chat_message("ai").write_stream(stream_data(ai_output))
+        except Exception as e:
+            st.error(f"❌ An error occurred: {str(e)}")
